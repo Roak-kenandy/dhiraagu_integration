@@ -275,14 +275,3 @@ DEBUG=dhiraagu:* npm start
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Support
-
-For support and questions:
-- Create an issue in the GitHub repository
-- Contact the development team
-- Check the documentation for troubleshooting
-
----
-
-**Made with ❤️ for Dhiraagu OTT Service**
