@@ -532,7 +532,7 @@ const getSubscriptionDetails = async (contactId, payload) => {
       custom_fields: allowedDevices.customFields || null,
       firstname: payload?.first_name || '',
       lastname: payload?.last_name || '',
-      number: payload?.number || '',
+      number: payload?.phone_number || '',
     };
   }
   return {
@@ -541,7 +541,7 @@ const getSubscriptionDetails = async (contactId, payload) => {
     custom_fields: null,
     firstname: payload?.first_name || '',
     lastname: payload?.last_name || '',
-    number: payload?.number || '',
+    number: payload?.phone_number || '',
   };
 };
 
@@ -550,7 +550,7 @@ const handleSubscribe = async (req, res) => {
   try {
     validatePayload(req.body);
 
-    const phoneNumber = req.body?.number;
+    const phoneNumber = req.body?.phone_number;
     const existingContactCheck = await checkExistingContact(phoneNumber, req.body);
 
     // Case 1: Contact exists with Dhiraagu OTT tag
