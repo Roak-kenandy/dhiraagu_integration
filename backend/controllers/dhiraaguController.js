@@ -230,7 +230,7 @@ const validatePayload = (payload) => {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Invalid payload: Request body is required');
   }
-  if (!payload.first_name || !payload.last_name || !payload.number) {
+  if (!payload.first_name || !payload.last_name || !payload.phone_number) {
     throw new Error('Invalid payload: First name and phone number are required');
   }
 };
@@ -238,6 +238,7 @@ const validatePayload = (payload) => {
 // Service functions for each operation
 // Service function to create contact
 const createContact = async (body) => {
+  const number = body.phone_number;
   try {
     // Build CRM payload
     const payload = {
@@ -248,7 +249,7 @@ const createContact = async (body) => {
       },
       phone: {
         country_code: "MDV",
-        number: body.number,
+        number: number,
         type: "MOBILE",
       },
     };
