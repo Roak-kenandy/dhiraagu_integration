@@ -83,7 +83,7 @@ const checkExistingContact = async (phoneNumber, reqBody) => {
     return {
       status: '409',
       message: 'Dhiraagu OTT tag not found for contact',
-      data: null,
+      data: { contactId },
     };
   }
 
@@ -94,19 +94,19 @@ const checkExistingContact = async (phoneNumber, reqBody) => {
     status: '200',
     message: 'success',
     data: {
-      id: uuidv4(),
+      id: contactId,
       firstname: subscriptionDetails.firstname,
       lastname: subscriptionDetails.lastname,
       tag: 'Dhiraagu OTT',
       number: subscriptionDetails.number,
-      subscribed: !!subscriptionDetails.state && subscriptionDetails.state === 'ACTIVE',
+      subscribed: subscriptionDetails.state === 'ACTIVE',
     },
   };
 };
 
 
 const getContactDetails = async (req, res) => {
-    const { phone_number } = req.params;
+    const { phone_number } = req.body;
 
     try {
         // Fetch contacts
@@ -119,6 +119,7 @@ const getContactDetails = async (req, res) => {
         );
 
         const contactsData = await contactsResponse.json();
+        
 
         if (!contactsResponse.ok) {
             return res.status(contactsResponse.status).json({
@@ -229,30 +230,49 @@ const validatePayload = (payload) => {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Invalid payload: Request body is required');
   }
-  if (!payload.person_name || !payload.person_name.first_name || !payload.phone || !payload.phone.number) {
+  if (!payload.first_name || !payload.last_name || !payload.number) {
     throw new Error('Invalid payload: First name and phone number are required');
   }
 };
 
 // Service functions for each operation
-const createContact = async (payload) => {
+// Service function to create contact
+const createContact = async (body) => {
   try {
+    // Build CRM payload
+    const payload = {
+      type: "PERSON",
+      person_name: {
+        first_name: body.first_name,
+        last_name: body.last_name,
+      },
+      phone: {
+        country_code: "MDV",
+        number: body.number,
+        type: "MOBILE",
+      },
+    };
+
+    // Send to CRM API
     const response = await withTimeout(
-      async () => fetch(`${CONFIG.CRM_BASE_URL}/contacts`, {
-        method: 'POST',
-        headers: crmHeaders,
-        body: JSON.stringify(payload),
-      }),
+      async () =>
+        fetch(`${CONFIG.CRM_BASE_URL}/contacts`, {
+          method: "POST",
+          headers: crmHeaders,
+          body: JSON.stringify(payload),
+        }),
       5000,
-      'Contact creation'
+      "Contact creation"
     );
-    const data = await handleResponse(response, 'Contact creation');
+
+    const data = await handleResponse(response, "Contact creation");
     return data;
   } catch (error) {
-    console.error('Contact creation error:', error);
+    console.error("Contact creation error:", error);
     throw error;
   }
 };
+
 
 const registerContactTag = async (contactId, tags = [CONFIG.DEFAULT_TAG_ID]) => {
   const response = await withTimeout(
@@ -306,26 +326,55 @@ const createAccount = async (contactId) => {
   return handleResponse(response, 'Account creation');
 };
 
-const createJournalEntry = async (contactId, accountId) => {
-  const payload = {
-    action: 'CREDIT',
-    amount: "35.00",
-    currency_code: "MVR",
-    entity: "ACCOUNT",
-    entity_id: accountId,
-    notes: "Initial credit for new subscription",
+const fetchAccounts = async (contactId) => {
+  const response = await fetch(
+    `${CONFIG.CRM_BASE_URL}/contacts/${contactId}/accounts`,
+    { headers: crmHeaders }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch accounts: ${response.status}`);
   }
+
+  const accountsData = await response.json();
+  if (!accountsData.content || accountsData.content.length === 0) {
+    throw new Error('No accounts found for this contact');
+  }
+
+  // Assuming we take the first account if multiple exist
+  return accountsData.content[0];
+};
+
+
+const createPayment = async (contactId, payment_ref, accountId) => {
+  const payload = {
+    contact_id: contactId,
+    account_id: accountId,
+    amount: 35,
+    currency_code: 'MVR',
+    notes: 'Dhiraagu Payment',
+    payment_method: {
+      type: 'ELECTRONIC_TRANSFER'
+    },
+    state: 'POSTED',
+    backoffice_code: payment_ref,
+    type_id: 'a3afdee8-3596-4e3a-8df4-1ddc99f86107',
+    external_payable: ['Dhiraagu Payment']
+  };
+
   const response = await withTimeout(
-    async () => fetch(`${CONFIG.CRM_BASE_URL}/contacts/${contactId}/journals`, {
+    async () => fetch(`${CONFIG.CRM_BASE_URL}/payments`, {
       method: 'POST',
       headers: crmHeaders,
       body: JSON.stringify(payload),
     }),
     2000,
-    'Journal entry creation'
+    'Payment creation'
   );
-  return handleResponse(response, 'Journal entry creation');
+
+  return handleResponse(response, 'Payment creation');
 };
+
 
 const createSubscription = async (contactId, accountId) => {
   const tryPostSubscription = async (priceTermsId) => {
@@ -461,6 +510,7 @@ const getAllowedDevices = async (subscriptionId, contactId) => {
   return { deviceIds: [], customFields: null };
 };
 
+
 const getSubscriptionDetails = async (contactId, payload) => {
   const response = await withTimeout(
     async () => fetch(`${CONFIG.CRM_BASE_URL}/contacts/${contactId}/subscriptions`, {
@@ -479,18 +529,18 @@ const getSubscriptionDetails = async (contactId, payload) => {
       state: data.content[0].state,
       device_ids: allowedDevices.deviceIds || [],
       custom_fields: allowedDevices.customFields || null,
-      firstname: payload.person_name?.first_name || '',
-      lastname: payload.person_name?.last_name || '',
-      number: payload.phone?.number || '',
+      firstname: payload?.first_name || '',
+      lastname: payload?.last_name || '',
+      number: payload?.number || '',
     };
   }
   return {
     subscription_id: null,
     device_ids: [],
     custom_fields: null,
-    firstname: payload.person_name?.first_name || '',
-    lastname: payload.person_name?.last_name || '',
-    number: payload.phone?.number || '',
+    firstname: payload?.first_name || '',
+    lastname: payload?.last_name || '',
+    number: payload?.number || '',
   };
 };
 
@@ -499,13 +549,82 @@ const handleSubscribe = async (req, res) => {
   try {
     validatePayload(req.body);
 
-    // Check if contact already exists with Dhiraagu OTT tag
-    const phoneNumber = req.body.phone?.number;
+    const phoneNumber = req.body?.number;
     const existingContactCheck = await checkExistingContact(phoneNumber, req.body);
 
-    // Case 1: Contact already has Dhiraagu OTT tag → stop
+    // Case 1: Contact exists with Dhiraagu OTT tag
     if (existingContactCheck.status === '200') {
-      return res.status(200).json(existingContactCheck);
+      const { subscribed, id, subscriptionDetails } = existingContactCheck.data;
+      const contactId = id;
+
+      if (subscribed) {
+        // Already ACTIVE → stop
+        return res.status(200).json(existingContactCheck);
+      } else {
+        // Contact has OTT tag but subscription is not ACTIVE
+
+        const accountData = await fetchAccounts(contactId);
+        const newSubscriptionDetails = await getSubscriptionDetails(contactId, req.body);
+
+        if (newSubscriptionDetails.state === 'INACTIVE') {
+          // Reactivate existing subscription
+          await createPayment(contactId, req.body.payment_ref, accountData.id);
+
+          return res.status(200).json({
+            status: '201',
+            message: 'Subscription re-activated',
+            data: {
+              id: uuidv4(),
+              firstname: newSubscriptionDetails.firstname,
+              lastname: newSubscriptionDetails.lastname,
+              tag: 'Dhiraagu OTT',
+              number: newSubscriptionDetails.number,
+              subscribed: true,
+            },
+          });
+        } else if (newSubscriptionDetails.state === 'CHURNED'){
+          // Create new subscription flow
+          await createPayment(contactId, req.body.payment_ref, accountData.id);
+          await createSubscription(contactId, accountData.id);
+
+          const updatedSubscription = await getSubscriptionDetails(contactId, req.body);
+
+          return res.status(201).json({
+            status: '201',
+            message: 'New subscription created',
+            data: {
+              id: uuidv4(),
+              firstname: updatedSubscription.firstname,
+              lastname: updatedSubscription.lastname,
+              tag: 'Dhiraagu OTT',
+              number: updatedSubscription.number,
+              subscribed: updatedSubscription.state === 'ACTIVE',
+            },
+          });
+        }
+        
+        else {
+          // Create new subscription flow
+          await registerDevice(contactId);
+          await createPayment(contactId, req.body.payment_ref, accountData.id);
+          await createSubscription(contactId, accountData.id);
+
+          const updatedSubscription = await getSubscriptionDetails(contactId, req.body);
+
+          return res.status(201).json({
+            status: '201',
+            message: 'New subscription created',
+            data: {
+              id: uuidv4(),
+              firstname: updatedSubscription.firstname,
+              lastname: updatedSubscription.lastname,
+              tag: 'Dhiraagu OTT',
+              number: updatedSubscription.number,
+              subscribed: updatedSubscription.state === 'ACTIVE',
+            },
+          });
+        }
+      }
     }
 
     // Case 2: Contact exists but no OTT tag → stop
@@ -513,39 +632,23 @@ const handleSubscribe = async (req, res) => {
       return res.status(409).json(existingContactCheck);
     }
 
-    // Case 3: Contact not found → continue with subscription process
+    // Case 3: Contact not found → full subscription process
     if (existingContactCheck.status === '404') {
       console.log('Contact not found. Proceeding with contact creation...');
     }
 
-    // Execute all operations with a 14-second timeout
+    // Normal flow for new contact
     const result = await withTimeout(async () => {
-
-      // Step 1: Create contact
       const contactData = await createContact(req.body);
       const contactId = contactData.id;
 
-      // Step 2: Register tag
       await registerContactTag(contactId);
-
-      // Step 3: Register device
-      const deviceData = await registerDevice(contactId);
-
-      // Step 4: Create account
+      await registerDevice(contactId);
       const accountData = await createAccount(contactId);
-
-      // Step 5: Create journal entry
-      const journalData = await createJournalEntry(contactId, accountData.id);
-
-      // Step 6: Create subscription
+      await createPayment(contactId, req.body.payment_ref, accountData.id);
       await createSubscription(contactId, accountData.id);
 
-      // Step 7: Fetch subscription details
       const subscriptionDetails = await getSubscriptionDetails(contactId, req.body);
-
-      // Step 8: Get tag name
-      const tagsData = await fetchContactTags(contactId);
-      const tagName = tagsData.content?.find(tag => tag.id === CONFIG.DEFAULT_TAG_ID)?.name || 'Dhiraagu OTT';
 
       return {
         status: '201',
@@ -554,9 +657,9 @@ const handleSubscribe = async (req, res) => {
           id: uuidv4(),
           firstname: subscriptionDetails.firstname,
           lastname: subscriptionDetails.lastname,
-          tag: tagName,
+          tag: 'Dhiraagu OTT',
           number: subscriptionDetails.number,
-          subscribed: !!subscriptionDetails.subscription_id,
+          subscribed: subscriptionDetails.state === 'ACTIVE',
         },
       };
     }, 14000, 'Subscription process');
@@ -565,7 +668,8 @@ const handleSubscribe = async (req, res) => {
 
   } catch (error) {
     console.error('Subscription process error:', error);
-    const statusCode = error.message.includes('Invalid') || error.message.includes('failed') ? 400 : 500;
+    const statusCode =
+      error.message.includes('Invalid') || error.message.includes('failed') ? 400 : 500;
     return res.status(statusCode).json({
       status: statusCode.toString(),
       message: error.message || 'Internal server error',
@@ -573,6 +677,7 @@ const handleSubscribe = async (req, res) => {
     });
   }
 };
+
 
 
 module.exports = {
