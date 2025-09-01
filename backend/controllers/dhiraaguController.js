@@ -555,7 +555,7 @@ const handleSubscribe = async (req, res) => {
 
     // Case 1: Contact exists with Dhiraagu OTT tag
     if (existingContactCheck.status === '200') {
-      const { subscribed, id, subscriptionDetails } = existingContactCheck.data;
+      const { subscribed, id } = existingContactCheck.data;
       const contactId = id;
 
       if (subscribed) {
@@ -563,11 +563,10 @@ const handleSubscribe = async (req, res) => {
         return res.status(200).json(existingContactCheck);
       } else {
         // Contact has OTT tag but subscription is not ACTIVE
-
         const accountData = await fetchAccounts(contactId);
-        const newSubscriptionDetails = await getSubscriptionDetails(contactId, req.body);
+        const subscriptionDetails = await getSubscriptionDetails(contactId, req.body);
 
-        if (newSubscriptionDetails.state === 'INACTIVE') {
+        if (subscriptionDetails.state === 'INACTIVE') {
           // Reactivate existing subscription
           await createPayment(contactId, req.body.payment_ref, accountData.id);
 
@@ -576,35 +575,14 @@ const handleSubscribe = async (req, res) => {
             message: 'Subscription re-activated',
             data: {
               id: uuidv4(),
-              firstname: newSubscriptionDetails.firstname,
-              lastname: newSubscriptionDetails.lastname,
+              firstname: subscriptionDetails.firstname,
+              lastname: subscriptionDetails.lastname,
               tag: 'Dhiraagu OTT',
-              number: newSubscriptionDetails.number,
+              number: subscriptionDetails.number,
               subscribed: true,
             },
           });
-        } else if (newSubscriptionDetails.state === 'CHURNED'){
-          // Create new subscription flow
-          await createPayment(contactId, req.body.payment_ref, accountData.id);
-          await createSubscription(contactId, accountData.id);
-
-          const updatedSubscription = await getSubscriptionDetails(contactId, req.body);
-
-          return res.status(201).json({
-            status: '201',
-            message: 'New subscription created',
-            data: {
-              id: uuidv4(),
-              firstname: updatedSubscription.firstname,
-              lastname: updatedSubscription.lastname,
-              tag: 'Dhiraagu OTT',
-              number: updatedSubscription.number,
-              subscribed: updatedSubscription.state === 'ACTIVE',
-            },
-          });
-        }
-        
-        else {
+        } else {
           // Create new subscription flow
           await registerDevice(contactId);
           await createPayment(contactId, req.body.payment_ref, accountData.id);
@@ -628,19 +606,10 @@ const handleSubscribe = async (req, res) => {
       }
     }
 
-    // Case 2: Contact exists but no OTT tag → stop
-    if (existingContactCheck.status === '409') {
-      return res.status(409).json(existingContactCheck);
-    }
-
-    // Case 3: Contact not found → full subscription process
-    if (existingContactCheck.status === '404') {
-      console.log('Contact not found. Proceeding with contact creation...');
-    }
-
-    // Normal flow for new contact
+    // Case 2 & 3: Contact does NOT exist OR contact exists but no OTT tag
+    // Always create a NEW contact from scratch
     const result = await withTimeout(async () => {
-      const contactData = await createContact(req.body);
+      const contactData = await createContact(req.body); // NEW contact
       const contactId = contactData.id;
 
       await registerContactTag(contactId);
@@ -678,6 +647,7 @@ const handleSubscribe = async (req, res) => {
     });
   }
 };
+
 
 
 
