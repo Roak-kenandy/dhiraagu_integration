@@ -582,6 +582,24 @@ const handleSubscribe = async (req, res) => {
               subscribed: true,
             },
           });
+        } else if (subscriptionDetails.state === 'CHURNED'){
+          await createPayment(contactId, req.body.payment_ref, accountData.id);
+          await createSubscription(contactId, accountData.id);
+
+          const updatedSubscription = await getSubscriptionDetails(contactId, req.body);
+
+          return res.status(201).json({
+            status: '201',
+            message: 'New subscription created',
+            data: {
+              id: uuidv4(),
+              firstname: updatedSubscription.firstname,
+              lastname: updatedSubscription.lastname,
+              tag: 'Dhiraagu OTT',
+              number: updatedSubscription.number,
+              subscribed: updatedSubscription.state === 'ACTIVE',
+            },
+          });
         } else {
           // Create new subscription flow
           await registerDevice(contactId);
